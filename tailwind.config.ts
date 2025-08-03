@@ -26,7 +26,8 @@ export default {
 				foreground: 'hsl(var(--foreground))',
 				primary: {
 					DEFAULT: 'hsl(var(--primary))',
-					foreground: 'hsl(var(--primary-foreground))'
+					foreground: 'hsl(var(--primary-foreground))',
+					glow: 'hsl(var(--primary-glow))'
 				},
 				secondary: {
 					DEFAULT: 'hsl(var(--secondary))',
@@ -52,16 +53,30 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
-				sidebar: {
-					DEFAULT: 'hsl(var(--sidebar-background))',
-					foreground: 'hsl(var(--sidebar-foreground))',
-					primary: 'hsl(var(--sidebar-primary))',
-					'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
-					accent: 'hsl(var(--sidebar-accent))',
-					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
-					border: 'hsl(var(--sidebar-border))',
-					ring: 'hsl(var(--sidebar-ring))'
+				// Chat-specific colors
+				'chat-bubble': {
+					sent: 'hsl(var(--chat-bubble-sent))',
+					received: 'hsl(var(--chat-bubble-received))',
+					'sent-foreground': 'hsl(var(--chat-bubble-sent-foreground))',
+					'received-foreground': 'hsl(var(--chat-bubble-received-foreground))'
+				},
+				// Status colors
+				status: {
+					online: 'hsl(var(--status-online))',
+					idle: 'hsl(var(--status-idle))',
+					offline: 'hsl(var(--status-offline))',
+					stealth: 'hsl(var(--status-stealth))'
+				},
+				// Story colors
+				story: {
+					ring: 'hsl(var(--story-ring))',
+					viewed: 'hsl(var(--story-viewed))'
 				}
+			},
+			backgroundImage: {
+				'gradient-primary': 'var(--gradient-primary)',
+				'gradient-neon': 'var(--gradient-neon)',
+				'gradient-chat': 'var(--gradient-chat)'
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
