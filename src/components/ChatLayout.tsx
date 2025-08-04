@@ -2,9 +2,9 @@ import { useState } from "react";
 import { MessageCircle, Compass, User, Search, UserPlus, Users, Bell, Archive, MoreVertical, Lock, Clock, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { StoryRing } from "./StoryRing";
-import { ChatItem } from "./ChatItem";
 
 type Tab = "chat" | "discovery" | "you";
 
@@ -142,13 +142,18 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
               {stories.length > 0 && (
                 <div className="w-20 bg-card border-r border-border p-2 space-y-3">
                   {stories.map((story) => (
-                    <StoryRing
-                      key={story.id}
-                      username={story.username}
-                      avatar={story.avatar}
-                      hasViewed={story.hasViewed}
-                      onClick={() => console.log(`View story: ${story.username}`)}
-                    />
+                    <div key={story.id} className="flex flex-col items-center">
+                      <div className={`p-0.5 rounded-full ${story.hasViewed ? 'bg-story-viewed' : 'story-ring'}`}>
+                        <Avatar className="h-12 w-12 border-2 border-background">
+                          <AvatarFallback className="text-xs bg-gradient-primary text-white">
+                            {story.username.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                      <span className="text-xs text-muted-foreground mt-1 truncate w-full text-center">
+                        {story.username}
+                      </span>
+                    </div>
                   ))}
                 </div>
               )}
@@ -159,18 +164,40 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                   Messages older than 7 days will be automatically removed to protect your privacy
                 </div>
                 {chats.map((chat) => (
-                  <ChatItem
+                  <div
                     key={chat.id}
-                    id={chat.id}
-                    name={chat.name}
-                    avatar={chat.avatar}
-                    lastMessage={chat.lastMessage}
-                    timestamp={chat.timestamp}
-                    unreadCount={chat.unreadCount}
-                    isGroup={chat.isGroup}
-                    status={chat.status}
-                    onClick={() => console.log(`Open chat: ${chat.name}`)}
-                  />
+                    className="flex items-center gap-3 p-4 hover:bg-muted/50 cursor-pointer border-b border-border/50 transition-colors"
+                  >
+                    <div className="relative">
+                      <Avatar className="h-12 w-12">
+                        <AvatarFallback className="bg-gradient-primary text-white">
+                          {chat.name.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      {!chat.isGroup && chat.status && (
+                        <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background ${getStatusColor(chat.status)}`} />
+                      )}
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium truncate">{chat.name}</h3>
+                          {chat.isGroup && (
+                            <Users className="h-3 w-3 text-muted-foreground" />
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">{chat.timestamp}</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
+                    </div>
+                    
+                    {chat.unreadCount > 0 && (
+                      <Badge variant="default" className="bg-primary text-primary-foreground">
+                        {chat.unreadCount}
+                      </Badge>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
