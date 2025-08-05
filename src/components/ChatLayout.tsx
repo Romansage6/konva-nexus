@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MessageCircle, Compass, User, Search, UserPlus, Users, Bell, Archive, MoreVertical, Lock, Clock, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useChatStore } from "@/store/chatStore";
+import { useAuthStore } from "@/store/authStore";
+import ChatInterface from "@/components/chat/ChatInterface";
+import Discovery from "@/pages/Discovery";
+import Profile from "@/pages/Profile";
 
 type Tab = "chat" | "discovery" | "you";
 
@@ -27,48 +32,13 @@ interface Chat {
   status?: "online" | "idle" | "offline" | "stealth";
 }
 
-export default function ChatLayout({ children }: { children: React.ReactNode }) {
+export default function ChatLayout() {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
+  const { chats, setCurrentChat, currentChat } = useChatStore();
+  const { user } = useAuthStore();
   
-  // Mock data - will be replaced with real data from Supabase
-  const stories: Story[] = [
-    { id: "1", username: "alex", avatar: "", hasViewed: false },
-    { id: "2", username: "maya", avatar: "", hasViewed: true },
-    { id: "3", username: "jordan", avatar: "", hasViewed: false },
-  ];
-
-  const chats: Chat[] = [
-    {
-      id: "1",
-      name: "Alex Chen",
-      avatar: "",
-      lastMessage: "Hey! How's it going?",
-      timestamp: "2m ago",
-      unreadCount: 2,
-      isGroup: false,
-      isOnline: true,
-      status: "online"
-    },
-    {
-      id: "2", 
-      name: "Design Team",
-      avatar: "",
-      lastMessage: "Maya: The new mockups look great! 🎨",
-      timestamp: "1h ago",
-      unreadCount: 0,
-      isGroup: true
-    },
-    {
-      id: "3",
-      name: "Jordan Smith", 
-      avatar: "",
-      lastMessage: "Thanks for the help earlier",
-      timestamp: "3h ago", 
-      unreadCount: 0,
-      isGroup: false,
-      status: "idle"
-    }
-  ];
+  // Mock stories data - will be replaced with real data from Supabase
+  const stories: Story[] = [];
 
   const getStatusColor = (status?: string) => {
     switch (status) {
@@ -158,77 +128,65 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 </div>
               )}
 
-              {/* Chat List */}
-              <div className="flex-1 overflow-y-auto">
-                <div className="p-2 text-xs text-muted-foreground bg-muted/50 border-b border-border text-center">
-                  Messages older than 7 days will be automatically removed to protect your privacy
-                </div>
-                {chats.map((chat) => (
-                  <div
-                    key={chat.id}
-                    className="flex items-center gap-3 p-4 hover:bg-muted/50 cursor-pointer border-b border-border/50 transition-colors"
-                  >
-                    <div className="relative">
-                      <Avatar className="h-12 w-12">
-                        <AvatarFallback className="bg-gradient-primary text-white">
-                          {chat.name.slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      {!chat.isGroup && chat.status && (
-                        <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background ${getStatusColor(chat.status)}`} />
-                      )}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium truncate">{chat.name}</h3>
-                          {chat.isGroup && (
-                            <Users className="h-3 w-3 text-muted-foreground" />
-                          )}
-                        </div>
-                        <span className="text-xs text-muted-foreground">{chat.timestamp}</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
-                    </div>
-                    
-                    {chat.unreadCount > 0 && (
-                      <Badge variant="default" className="bg-primary text-primary-foreground">
-                        {chat.unreadCount}
-                      </Badge>
-                    )}
+              {/* Chat List and Interface */}
+              <div className="flex-1 flex">
+                {/* Chat List */}
+                <div className="w-80 bg-card border-r border-border overflow-y-auto">
+                  <div className="p-2 text-xs text-muted-foreground bg-muted/50 border-b border-border text-center">
+                    Messages older than 7 days will be automatically removed to protect your privacy
                   </div>
-                ))}
+                  {chats.map((chat) => (
+                    <div
+                      key={chat.id}
+                      onClick={() => setCurrentChat(chat)}
+                      className={`flex items-center gap-3 p-4 hover:bg-muted/50 cursor-pointer border-b border-border/50 transition-colors ${
+                        currentChat?.id === chat.id ? 'bg-muted' : ''
+                      }`}
+                    >
+                      <div className="relative">
+                        <Avatar className="h-12 w-12">
+                          <AvatarImage src={chat.avatar_url} />
+                          <AvatarFallback className="bg-gradient-primary text-white">
+                            {(chat.name || 'Chat').slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        {chat.type === 'dm' && (
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background bg-status-online" />
+                        )}
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium truncate">{chat.name || 'Chat'}</h3>
+                            {chat.type === 'group' && (
+                              <Users className="h-3 w-3 text-muted-foreground" />
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {chat.last_message_at ? new Date(chat.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          </span>
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {chat.type === 'group' ? `Group chat • ${chat.description || 'No description'}` : 'Direct message'}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Chat Interface */}
+                <ChatInterface />
               </div>
             </div>
           </div>
         );
       
       case "discovery":
-        return (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center space-y-4">
-              <Compass className="h-16 w-16 mx-auto text-primary" />
-              <h2 className="text-2xl font-bold">Discovery</h2>
-              <div className="space-y-2 text-muted-foreground">
-                <p>🎌 Manga Hub</p>
-                <p>📺 Anime Hub</p>
-                <p>🤖 AI Interface</p>
-              </div>
-            </div>
-          </div>
-        );
+        return <Discovery />;
       
       case "you":
-        return (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center space-y-4">
-              <User className="h-16 w-16 mx-auto text-primary" />
-              <h2 className="text-2xl font-bold">Profile & Settings</h2>
-              <p className="text-muted-foreground">Manage your account and preferences</p>
-            </div>
-          </div>
-        );
+        return <Profile />;
     }
   };
 
