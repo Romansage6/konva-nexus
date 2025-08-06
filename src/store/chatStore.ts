@@ -1,71 +1,52 @@
 import { create } from 'zustand'
-import { supabase } from '@/integrations/supabase/client'
+import { supabase } from '@/lib/supabase-client'
 import type { Chat, Message, ChatMember } from '@/lib/supabase'
 import { toast } from '@/hooks/use-toast'
 
 interface ChatState {
   chats: Chat[]
-  messages: Record<string, Message[]>
+  messages: Message[]
   currentChat: Chat | null
   loading: boolean
-  sendingMessage: boolean
-  
-  // Actions
   loadChats: () => Promise<void>
   loadMessages: (chatId: string) => Promise<void>
-  sendMessage: (chatId: string, content: string, type?: 'text' | 'image' | 'video' | 'file' | 'voice' | 'gif') => Promise<void>
-  createDM: (userId: string) => Promise<Chat>
-  createGroupChat: (name: string, description?: string, userIds?: string[]) => Promise<Chat>
+  sendMessage: (chatId: string, content: string, type?: string) => Promise<void>
+  createDM: (userId: string) => Promise<string>
+  createGroupChat: (name: string, memberIds: string[]) => Promise<string>
   setCurrentChat: (chat: Chat | null) => void
-  subscribeToMessages: (chatId: string) => void
-  subscribeToChats: () => void
+  subscribeToMessages: (chatId: string) => () => void
+  subscribeToChats: () => () => void
   deleteMessage: (messageId: string) => Promise<void>
   editMessage: (messageId: string, content: string) => Promise<void>
-  addReaction: (messageId: string, emoji: string) => Promise<void>
-  removeReaction: (messageId: string, emoji: string) => Promise<void>
+  addReaction: (messageId: string, emoji: string, userId: string) => Promise<void>
+  removeReaction: (messageId: string, emoji: string, userId: string) => Promise<void>
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   chats: [],
-  messages: {},
+  messages: [],
   currentChat: null,
   loading: false,
-  sendingMessage: false,
 
   loadChats: async () => {
     set({ loading: true })
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const { data: session } = await supabase.auth.getSession()
+      if (!session.data.session?.user) return
 
-      // Get user's chats through chat_members
-      const { data: memberData, error } = await supabase
-        .from('chat_members')
+      const { data: chats, error } = await supabase
+        .from('chats')
         .select(`
-          chat_id,
-          user_id,
-          chats!inner (
-            id,
-            name,
-            type,
-            avatar_url,
-            description,
-            is_private,
-            created_by,
-            created_at,
-            updated_at,
-            last_message_at,
-            auto_delete_days
-          )
+          *,
+          chat_members!inner(user_id)
         `)
-        .eq('user_id', user.id)
+        .eq('chat_members.user_id', session.data.session.user.id)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
 
       if (error) throw error
 
-      const chats = memberData?.map(m => (m as any).chats).filter(Boolean) || []
-      set({ chats })
+      set({ chats: chats || [] })
     } catch (error: any) {
-      console.error('Error loading chats:', error)
       toast({
         title: "Failed to load chats",
         description: error.message,
@@ -78,40 +59,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadMessages: async (chatId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data: messages, error } = await supabase
         .from('messages')
         .select(`
-          id,
-          chat_id,
-          user_id,
-          content,
-          type,
-          reply_to,
-          edited_at,
-          created_at,
-          reactions,
-          media_url,
-          media_type,
-          users (
-            id,
-            username,
-            nickname,
-            avatar_url
-          )
+          *,
+          users(username, nickname, avatar_url)
         `)
         .eq('chat_id', chatId)
         .order('created_at', { ascending: true })
 
       if (error) throw error
 
-      set(state => ({
-        messages: {
-          ...state.messages,
-          [chatId]: data || []
-        }
-      }))
+      set({ messages: messages || [] })
     } catch (error: any) {
-      console.error('Error loading messages:', error)
       toast({
         title: "Failed to load messages",
         description: error.message,
@@ -120,108 +80,86 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (chatId: string, content: string, type = 'text') => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    set({ sendingMessage: true })
+  sendMessage: async (chatId: string, content: string, type: string = 'text') => {
     try {
-      const { data, error } = await supabase
+      const { data: session } = await supabase.auth.getSession()
+      if (!session.data.session?.user) throw new Error('Not authenticated')
+
+      const { error } = await supabase
         .from('messages')
         .insert({
           chat_id: chatId,
-          user_id: user.id,
+          user_id: session.data.session.user.id,
           content,
           type
         })
-        .select()
-        .single()
 
       if (error) throw error
 
-      // Update chat's last_message_at
+      // Update last_message_at in chat
       await supabase
         .from('chats')
         .update({ last_message_at: new Date().toISOString() })
         .eq('id', chatId)
 
     } catch (error: any) {
-      console.error('Error sending message:', error)
       toast({
         title: "Failed to send message",
         description: error.message,
         variant: "destructive"
       })
-    } finally {
-      set({ sendingMessage: false })
     }
   },
 
   createDM: async (userId: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error('Not authenticated')
-
     try {
+      const { data: session } = await supabase.auth.getSession()
+      if (!session.data.session?.user) throw new Error('Not authenticated')
+
       // Check if DM already exists
       const { data: existingChat } = await supabase
-        .from('chat_members')
+        .from('chats')
         .select(`
-          chat_id,
-          chats!inner (
-            id,
-            type,
-            name,
-            avatar_url,
-            description,
-            is_private,
-            created_by,
-            created_at,
-            updated_at,
-            last_message_at,
-            auto_delete_days
-          )
+          id,
+          chat_members!inner(user_id)
         `)
-        .eq('chats.type', 'dm')
-        .in('user_id', [user.id, userId])
+        .eq('type', 'dm')
+        .eq('chat_members.user_id', session.data.session.user.id)
 
-      // Find chat that has both users
-      const dmChat = existingChat?.find(chat => {
-        const chatMembers = existingChat.filter(c => c.chat_id === chat.chat_id)
-        return chatMembers.length === 2 && 
-               chatMembers.some(c => (c as any).user_id === user.id) &&
-               chatMembers.some(c => (c as any).user_id === userId)
-      })
+      const dmWithUser = existingChat?.find((chat: any) => 
+        chat.chat_members.some((member: any) => member.user_id === userId) &&
+        chat.chat_members.length === 2
+      )
 
-      if (dmChat) {
-        return dmChat.chats
+      if (dmWithUser) {
+        return dmWithUser.id
       }
 
       // Create new DM
-      const { data: newChat, error: chatError } = await supabase
+      const { data: newChat, error } = await supabase
         .from('chats')
         .insert({
           type: 'dm',
-          is_private: true,
-          created_by: user.id
+          is_private: false,
+          created_by: session.data.session.user.id
         })
         .select()
         .single()
 
-      if (chatError) throw chatError
+      if (error) throw error
 
-      // Add both users as members
-      const { error: membersError } = await supabase
+      // Add members
+      const memberInserts = [
+        { chat_id: newChat.id, user_id: session.data.session.user.id, role: 'admin' },
+        { chat_id: newChat.id, user_id: userId, role: 'member' }
+      ]
+
+      await supabase
         .from('chat_members')
-        .insert([
-          { chat_id: newChat.id, user_id: user.id, role: 'admin' },
-          { chat_id: newChat.id, user_id: userId, role: 'member' }
-        ])
+        .insert(memberInserts)
 
-      if (membersError) throw membersError
-
-      return newChat
+      return newChat.id
     } catch (error: any) {
-      console.error('Error creating DM:', error)
       toast({
         title: "Failed to create DM",
         description: error.message,
@@ -231,52 +169,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createGroupChat: async (name: string, description?: string, userIds: string[] = []) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error('Not authenticated')
-
+  createGroupChat: async (name: string, memberIds: string[]) => {
     try {
-      // Create group chat
-      const { data: newChat, error: chatError } = await supabase
+      const { data: session } = await supabase.auth.getSession()
+      if (!session.data.session?.user) throw new Error('Not authenticated')
+
+      const { data: newChat, error } = await supabase
         .from('chats')
         .insert({
           name,
-          description,
           type: 'group',
           is_private: false,
-          created_by: user.id
+          created_by: session.data.session.user.id
         })
         .select()
         .single()
 
-      if (chatError) throw chatError
+      if (error) throw error
 
       // Add creator as admin
-      const members = [
-        { chat_id: newChat.id, user_id: user.id, role: 'admin' as const },
-        ...userIds.map(userId => ({
+      const memberInserts = [
+        { chat_id: newChat.id, user_id: session.data.session.user.id, role: 'admin' },
+        ...memberIds.map(userId => ({
           chat_id: newChat.id,
           user_id: userId,
           role: 'member' as const
         }))
       ]
 
-      const { error: membersError } = await supabase
+      await supabase
         .from('chat_members')
-        .insert(members)
+        .insert(memberInserts)
 
-      if (membersError) throw membersError
-
-      toast({
-        title: "Group created!",
-        description: `${name} has been created successfully.`
-      })
-
-      return newChat
+      return newChat.id
     } catch (error: any) {
-      console.error('Error creating group chat:', error)
       toast({
-        title: "Failed to create group",
+        title: "Failed to create group chat",
         description: error.message,
         variant: "destructive"
       })
@@ -294,66 +222,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
   subscribeToMessages: (chatId: string) => {
     const subscription = supabase
       .channel(`messages:${chatId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'messages',
-          filter: `chat_id=eq.${chatId}`
-        },
-        (payload) => {
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+        (payload: any) => {
           const { messages } = get()
-          const chatMessages = messages[chatId] || []
-          
-          if (payload.eventType === 'INSERT') {
-            set(state => ({
-              messages: {
-                ...state.messages,
-                [chatId]: [...chatMessages, payload.new as Message]
-              }
-            }))
-          } else if (payload.eventType === 'UPDATE') {
-            set(state => ({
-              messages: {
-                ...state.messages,
-                [chatId]: chatMessages.map(msg => 
-                  msg.id === payload.new.id ? payload.new as Message : msg
-                )
-              }
-            }))
-          } else if (payload.eventType === 'DELETE') {
-            set(state => ({
-              messages: {
-                ...state.messages,
-                [chatId]: chatMessages.filter(msg => msg.id !== payload.old.id)
-              }
-            }))
-          }
+          set({ messages: [...messages, payload.new] })
+        }
+      )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+        (payload: any) => {
+          const { messages } = get()
+          set({ 
+            messages: messages.map(msg => 
+              msg.id === payload.new.id ? payload.new : msg
+            )
+          })
+        }
+      )
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+        (payload: any) => {
+          const { messages } = get()
+          set({ 
+            messages: messages.filter(msg => msg.id !== payload.old.id)
+          })
         }
       )
       .subscribe()
 
-    return subscription
+    return () => subscription.unsubscribe()
   },
 
   subscribeToChats: () => {
     const subscription = supabase
       .channel('chats')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'chats'
-        },
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'chats' },
         () => {
           get().loadChats()
         }
       )
       .subscribe()
 
-    return subscription
+    return () => subscription.unsubscribe()
   },
 
   deleteMessage: async (messageId: string) => {
@@ -393,39 +305,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  addReaction: async (messageId: string, emoji: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
+  addReaction: async (messageId: string, emoji: string, userId: string) => {
     try {
-      // Get current message
       const { data: message } = await supabase
         .from('messages')
         .select('reactions')
         .eq('id', messageId)
         .single()
 
-      if (!message) return
-
-      const reactions = message.reactions || []
+      const reactions = message?.reactions || []
       const existingReaction = reactions.find((r: any) => r.emoji === emoji)
 
-      let updatedReactions
+      let newReactions
       if (existingReaction) {
-        // Add user to existing reaction
-        updatedReactions = reactions.map((r: any) => 
-          r.emoji === emoji 
-            ? { ...r, user_ids: [...new Set([...r.user_ids, user.id])] }
-            : r
-        )
+        if (!existingReaction.user_ids.includes(userId)) {
+          existingReaction.user_ids.push(userId)
+        }
+        newReactions = reactions
       } else {
-        // Create new reaction
-        updatedReactions = [...reactions, { emoji, user_ids: [user.id] }]
+        newReactions = [...reactions, { emoji, user_ids: [userId] }]
       }
 
       const { error } = await supabase
         .from('messages')
-        .update({ reactions: updatedReactions })
+        .update({ reactions: newReactions })
         .eq('id', messageId)
 
       if (error) throw error
@@ -438,31 +341,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  removeReaction: async (messageId: string, emoji: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
+  removeReaction: async (messageId: string, emoji: string, userId: string) => {
     try {
-      // Get current message
       const { data: message } = await supabase
         .from('messages')
         .select('reactions')
         .eq('id', messageId)
         .single()
 
-      if (!message) return
-
-      const reactions = message.reactions || []
-      const updatedReactions = reactions
+      const reactions = message?.reactions || []
+      const newReactions = reactions
         .map((r: any) => ({
           ...r,
-          user_ids: r.user_ids.filter((id: string) => id !== user.id)
+          user_ids: r.user_ids.filter((id: string) => id !== userId)
         }))
         .filter((r: any) => r.user_ids.length > 0)
 
       const { error } = await supabase
         .from('messages')
-        .update({ reactions: updatedReactions })
+        .update({ reactions: newReactions })
         .eq('id', messageId)
 
       if (error) throw error

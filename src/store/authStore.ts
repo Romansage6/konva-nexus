@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { supabase } from '@/integrations/supabase/client'
+import { supabase } from '@/lib/supabase-client'
 import type { User } from '@/lib/supabase'
 import { toast } from '@/hooks/use-toast'
 
@@ -102,7 +102,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       const { data, error } = await supabase.auth.signUp({
         email,
-        password
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`
+        }
       })
       
       if (error) throw error
@@ -145,7 +148,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin
+          redirectTo: `${window.location.origin}/`
         }
       })
       
