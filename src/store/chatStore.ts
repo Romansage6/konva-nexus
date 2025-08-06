@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { supabase, type Chat, type Message, type ChatMember } from '@/lib/supabase'
+import { supabase } from '@/integrations/supabase/client'
+import type { Chat, Message, ChatMember } from '@/lib/supabase'
 import { toast } from '@/hooks/use-toast'
 
 interface ChatState {

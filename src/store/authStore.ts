@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { supabase, type User } from '@/lib/supabase'
+import { supabase } from '@/integrations/supabase/client'
+import type { User } from '@/lib/supabase'
 import { toast } from '@/hooks/use-toast'
 
 interface AuthState {
