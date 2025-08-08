@@ -8,6 +8,7 @@ interface ChatState {
   messages: Message[]
   currentChat: Chat | null
   loading: boolean
+  sendingMessage: boolean
   loadChats: () => Promise<void>
   loadMessages: (chatId: string) => Promise<void>
   sendMessage: (chatId: string, content: string, type?: string) => Promise<void>
@@ -18,8 +19,8 @@ interface ChatState {
   subscribeToChats: () => () => void
   deleteMessage: (messageId: string) => Promise<void>
   editMessage: (messageId: string, content: string) => Promise<void>
-  addReaction: (messageId: string, emoji: string, userId: string) => Promise<void>
-  removeReaction: (messageId: string, emoji: string, userId: string) => Promise<void>
+  addReaction: (messageId: string, emoji: string) => Promise<void>
+  removeReaction: (messageId: string, emoji: string) => Promise<void>
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -27,12 +28,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   currentChat: null,
   loading: false,
+  sendingMessage: false,
 
   loadChats: async () => {
     set({ loading: true })
     try {
-      const { data: session } = await supabase.auth.getSession()
-      if (!session.data.session?.user) return
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) return
 
       const { data: chats, error } = await supabase
         .from('chats')
@@ -40,7 +42,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           *,
           chat_members!inner(user_id)
         `)
-        .eq('chat_members.user_id', session.data.session.user.id)
+        .eq('chat_members.user_id', session.user.id)
         .order('last_message_at', { ascending: false, nullsFirst: false })
 
       if (error) throw error
@@ -81,15 +83,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (chatId: string, content: string, type: string = 'text') => {
+    set({ sendingMessage: true })
     try {
-      const { data: session } = await supabase.auth.getSession()
-      if (!session.data.session?.user) throw new Error('Not authenticated')
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
       const { error } = await supabase
         .from('messages')
         .insert({
           chat_id: chatId,
-          user_id: session.data.session.user.id,
+          user_id: session.user.id,
           content,
           type
         })
@@ -108,13 +111,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         description: error.message,
         variant: "destructive"
       })
+    } finally {
+      set({ sendingMessage: false })
     }
   },
 
   createDM: async (userId: string) => {
     try {
-      const { data: session } = await supabase.auth.getSession()
-      if (!session.data.session?.user) throw new Error('Not authenticated')
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
       // Check if DM already exists
       const { data: existingChat } = await supabase
@@ -124,7 +129,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chat_members!inner(user_id)
         `)
         .eq('type', 'dm')
-        .eq('chat_members.user_id', session.data.session.user.id)
+        .eq('chat_members.user_id', session.user.id)
 
       const dmWithUser = existingChat?.find((chat: any) => 
         chat.chat_members.some((member: any) => member.user_id === userId) &&
@@ -141,7 +146,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .insert({
           type: 'dm',
           is_private: false,
-          created_by: session.data.session.user.id
+          created_by: session.user.id
         })
         .select()
         .single()
@@ -150,7 +155,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Add members
       const memberInserts = [
-        { chat_id: newChat.id, user_id: session.data.session.user.id, role: 'admin' },
+        { chat_id: newChat.id, user_id: session.user.id, role: 'admin' },
         { chat_id: newChat.id, user_id: userId, role: 'member' }
       ]
 
@@ -171,8 +176,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   createGroupChat: async (name: string, memberIds: string[]) => {
     try {
-      const { data: session } = await supabase.auth.getSession()
-      if (!session.data.session?.user) throw new Error('Not authenticated')
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
       const { data: newChat, error } = await supabase
         .from('chats')
@@ -180,7 +185,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           name,
           type: 'group',
           is_private: false,
-          created_by: session.data.session.user.id
+          created_by: session.user.id
         })
         .select()
         .single()
@@ -189,7 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Add creator as admin
       const memberInserts = [
-        { chat_id: newChat.id, user_id: session.data.session.user.id, role: 'admin' },
+        { chat_id: newChat.id, user_id: session.user.id, role: 'admin' },
         ...memberIds.map(userId => ({
           chat_id: newChat.id,
           user_id: userId,
@@ -305,8 +310,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  addReaction: async (messageId: string, emoji: string, userId: string) => {
+  addReaction: async (messageId: string, emoji: string) => {
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) return
+
       const { data: message } = await supabase
         .from('messages')
         .select('reactions')
@@ -318,12 +326,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       let newReactions
       if (existingReaction) {
-        if (!existingReaction.user_ids.includes(userId)) {
-          existingReaction.user_ids.push(userId)
+        if (!existingReaction.user_ids.includes(session.user.id)) {
+          existingReaction.user_ids.push(session.user.id)
         }
         newReactions = reactions
       } else {
-        newReactions = [...reactions, { emoji, user_ids: [userId] }]
+        newReactions = [...reactions, { emoji, user_ids: [session.user.id] }]
       }
 
       const { error } = await supabase
@@ -341,8 +349,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  removeReaction: async (messageId: string, emoji: string, userId: string) => {
+  removeReaction: async (messageId: string, emoji: string) => {
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) return
+
       const { data: message } = await supabase
         .from('messages')
         .select('reactions')
@@ -353,7 +364,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const newReactions = reactions
         .map((r: any) => ({
           ...r,
-          user_ids: r.user_ids.filter((id: string) => id !== userId)
+          user_ids: r.user_ids.filter((id: string) => id !== session.user.id)
         }))
         .filter((r: any) => r.user_ids.length > 0)
 

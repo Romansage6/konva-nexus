@@ -172,7 +172,7 @@ export default function ChatInterface() {
   
   const { user } = useAuthStore()
   
-  const currentMessages = currentChat ? messages[currentChat.id] || [] : []
+  const currentMessages = messages
 
   useEffect(() => {
     if (scrollAreaRef.current) {
