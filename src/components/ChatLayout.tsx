@@ -37,6 +37,11 @@ export default function ChatLayout() {
   const { chats, setCurrentChat, currentChat } = useChatStore();
   const { user } = useAuthStore();
   
+  // Ensure user is redirected to chat tab on initial load
+  useEffect(() => {
+    setActiveTab("chat");
+  }, []);
+  
   // Mock stories data - will be replaced with real data from Supabase
   const stories: Story[] = [];
 
