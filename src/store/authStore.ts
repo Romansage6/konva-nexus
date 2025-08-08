@@ -29,10 +29,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           .from('users')
           .select('*')
           .eq('id', session.user.id)
-          .single()
+          .maybeSingle()
         
         if (profile) {
           set({ user: profile, initialized: true })
+        } else {
+          // Create profile if it doesn't exist
+          const defaultProfile = {
+            id: session.user.id,
+            email: session.user.email || '',
+            username: session.user.email?.split('@')[0] || 'user',
+            nickname: session.user.email?.split('@')[0] || 'user',
+            status: "New to konva! 👋",
+            online_status: 'online' as const,
+            avatar_url: null,
+            bio: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+          
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert(defaultProfile)
+          
+          if (!insertError) {
+            set({ user: defaultProfile, initialized: true })
+          } else {
+            console.error('Failed to create profile:', insertError)
+            set({ user: null, initialized: true })
+          }
         }
       } else {
         set({ user: null, initialized: true })
@@ -45,10 +70,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             .from('users')
             .select('*')
             .eq('id', session.user.id)
-            .single()
+            .maybeSingle()
           
           if (profile) {
             set({ user: profile })
+          } else {
+            // Create profile if it doesn't exist
+            const defaultProfile = {
+              id: session.user.id,
+              email: session.user.email || '',
+              username: session.user.email?.split('@')[0] || 'user',
+              nickname: session.user.email?.split('@')[0] || 'user',
+              status: "New to konva! 👋",
+              online_status: 'online' as const,
+              avatar_url: null,
+              bio: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+            
+            const { error: insertError } = await supabase
+              .from('users')
+              .insert(defaultProfile)
+            
+            if (!insertError) {
+              set({ user: defaultProfile })
+            }
           }
         } else if (event === 'SIGNED_OUT') {
           set({ user: null })
