@@ -1,385 +1,194 @@
-import { create } from 'zustand'
-import { supabase } from '@/lib/supabase-client'
-import type { Chat, Message, ChatMember } from '@/lib/supabase'
-import { toast } from '@/hooks/use-toast'
+// store/chatStore.ts
+import create from 'zustand';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuthStore } from '@/store/authStore';
 
-interface ChatState {
-  chats: Chat[]
-  messages: Message[]
-  currentChat: Chat | null
-  loading: boolean
-  sendingMessage: boolean
-  loadChats: () => Promise<void>
-  loadMessages: (chatId: string) => Promise<void>
-  sendMessage: (chatId: string, content: string, type?: string) => Promise<void>
-  createDM: (userId: string) => Promise<string>
-  createGroupChat: (name: string, memberIds: string[]) => Promise<string>
-  setCurrentChat: (chat: Chat | null) => void
-  subscribeToMessages: (chatId: string) => () => void
-  subscribeToChats: () => () => void
-  deleteMessage: (messageId: string) => Promise<void>
-  editMessage: (messageId: string, content: string) => Promise<void>
-  addReaction: (messageId: string, emoji: string) => Promise<void>
-  removeReaction: (messageId: string, emoji: string) => Promise<void>
-}
+type Reaction = { emoji: string; user_ids: string[] };
+type Message = {
+  id: string;
+  chat_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  edited_at?: string | null;
+  reply_to?: string | null;
+  reply_to_content?: string | null;
+  reactions?: Reaction[];
+  users?: { id: string; nickname?: string; avatar_url?: string };
+};
 
-export const useChatStore = create<ChatState>((set, get) => ({
-  chats: [],
-  messages: [],
-  currentChat: null,
-  loading: false,
-  sendingMessage: false,
+type Chat = { id: string; name?: string; avatar_url?: string; type?: string; auto_delete_days?: number };
 
-  loadChats: async () => {
-    set({ loading: true })
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) return
+type ChatState = {
+  currentChat: Chat | null;
+  messages: Message[];
+  sendingMessage: boolean;
+  unreadMap: Record<string, number>;
+  loadMessages: (chatId: string) => Promise<void>;
+  sendMessage: (chatId: string, content: string, replyTo?: Message | null) => Promise<void>;
+  editMessage: (messageId: string, content: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
+  addReaction: (messageId: string, emoji: string) => Promise<void>;
+  removeReaction: (messageId: string, emoji: string) => Promise<void>;
+  subscribeToChat: (chatId: string) => void;
+  unsubscribe: () => void;
+  setCurrentChat: (chat: Chat | null) => void;
+};
 
-      const { data: chats, error } = await supabase
-        .from('chats')
-        .select(`
-          *,
-          chat_members!inner(user_id)
-        `)
-        .eq('chat_members.user_id', session.user.id)
-        .order('last_message_at', { ascending: false, nullsFirst: false })
+export const useChatStore = create<ChatState>((set, get) => {
+  let channel: any = null;
 
-      if (error) throw error
+  const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-      set({ chats: chats || [] })
-    } catch (error: any) {
-      toast({
-        title: "Failed to load chats",
-        description: error.message,
-        variant: "destructive"
-      })
-    } finally {
-      set({ loading: false })
-    }
-  },
+  return {
+    currentChat: null,
+    messages: [],
+    sendingMessage: false,
+    unreadMap: {},
 
-  loadMessages: async (chatId: string) => {
-    try {
-      const { data: messages, error } = await supabase
+    setCurrentChat: (chat) => set({ currentChat: chat }),
+
+    loadMessages: async (chatId) => {
+      const since = new Date(Date.now() - MESSAGE_RETENTION_MS).toISOString();
+      const { data, error } = await supabase
         .from('messages')
-        .select(`
-          *,
-          users(username, nickname, avatar_url)
-        `)
+        .select('*, users:profiles(id,nickname,avatar_url)')
         .eq('chat_id', chatId)
+        .gte('created_at', since)
         .order('created_at', { ascending: true })
+        .limit(500);
 
-      if (error) throw error
-
-      set({ messages: messages || [] })
-    } catch (error: any) {
-      toast({
-        title: "Failed to load messages",
-        description: error.message,
-        variant: "destructive"
-      })
-    }
-  },
-
-  sendMessage: async (chatId: string, content: string, type: string = 'text') => {
-    set({ sendingMessage: true })
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) throw new Error('Not authenticated')
-
-      const { error } = await supabase
-        .from('messages')
-        .insert({
-          chat_id: chatId,
-          user_id: session.user.id,
-          content,
-          type
-        })
-
-      if (error) throw error
-
-      // Update last_message_at in chat
-      await supabase
-        .from('chats')
-        .update({ last_message_at: new Date().toISOString() })
-        .eq('id', chatId)
-
-    } catch (error: any) {
-      toast({
-        title: "Failed to send message",
-        description: error.message,
-        variant: "destructive"
-      })
-    } finally {
-      set({ sendingMessage: false })
-    }
-  },
-
-  createDM: async (userId: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) throw new Error('Not authenticated')
-
-      // Check if DM already exists
-      const { data: existingChat } = await supabase
-        .from('chats')
-        .select(`
-          id,
-          chat_members!inner(user_id)
-        `)
-        .eq('type', 'dm')
-        .eq('chat_members.user_id', session.user.id)
-
-      const dmWithUser = existingChat?.find((chat: any) => 
-        chat.chat_members.some((member: any) => member.user_id === userId) &&
-        chat.chat_members.length === 2
-      )
-
-      if (dmWithUser) {
-        return dmWithUser.id
+      if (error) {
+        console.error('loadMessages', error);
+        return;
       }
 
-      // Create new DM
-      const { data: newChat, error } = await supabase
-        .from('chats')
-        .insert({
-          type: 'dm',
-          is_private: false,
-          created_by: session.user.id
-        })
-        .select()
-        .single()
+      // normalize users alias to message.users for UI compatibility
+      const normalized = (data || []).map((m: any) => ({ ...m }));
+      set({ messages: normalized });
+    },
 
-      if (error) throw error
+    sendMessage: async (chatId, content, replyTo) => {
+      const user = useAuthStore.getState().user;
+      if (!user) throw new Error('Not authenticated');
+      set({ sendingMessage: true });
+      const payload: any = {
+        chat_id: chatId,
+        user_id: user.id,
+        content,
+      };
+      if (replyTo) {
+        payload.reply_to = replyTo.id;
+        payload.reply_to_content = replyTo.content;
+      }
+      const { data, error } = await supabase.from('messages').insert(payload).select('*').single();
+      set({ sendingMessage: false });
+      if (error) {
+        console.error('sendMessage', error);
+        throw error;
+      }
+      // realtime will push the message; optimistic UI could be added
+      return data;
+    },
 
-      // Add members
-      const memberInserts = [
-        { chat_id: newChat.id, user_id: session.user.id, role: 'admin' },
-        { chat_id: newChat.id, user_id: userId, role: 'member' }
-      ]
-
-      await supabase
-        .from('chat_members')
-        .insert(memberInserts)
-
-      return newChat.id
-    } catch (error: any) {
-      toast({
-        title: "Failed to create DM",
-        description: error.message,
-        variant: "destructive"
-      })
-      throw error
-    }
-  },
-
-  createGroupChat: async (name: string, memberIds: string[]) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) throw new Error('Not authenticated')
-
-      const { data: newChat, error } = await supabase
-        .from('chats')
-        .insert({
-          name,
-          type: 'group',
-          is_private: false,
-          created_by: session.user.id
-        })
-        .select()
-        .single()
-
-      if (error) throw error
-
-      // Add creator as admin
-      const memberInserts = [
-        { chat_id: newChat.id, user_id: session.user.id, role: 'admin' },
-        ...memberIds.map(userId => ({
-          chat_id: newChat.id,
-          user_id: userId,
-          role: 'member' as const
-        }))
-      ]
-
-      await supabase
-        .from('chat_members')
-        .insert(memberInserts)
-
-      return newChat.id
-    } catch (error: any) {
-      toast({
-        title: "Failed to create group chat",
-        description: error.message,
-        variant: "destructive"
-      })
-      throw error
-    }
-  },
-
-  setCurrentChat: (chat: Chat | null) => {
-    set({ currentChat: chat })
-    if (chat) {
-      get().loadMessages(chat.id)
-    }
-  },
-
-  subscribeToMessages: (chatId: string) => {
-    const subscription = supabase
-      .channel(`messages:${chatId}`)
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-        (payload: any) => {
-          const { messages } = get()
-          set({ messages: [...messages, payload.new] })
-        }
-      )
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-        (payload: any) => {
-          const { messages } = get()
-          set({ 
-            messages: messages.map(msg => 
-              msg.id === payload.new.id ? payload.new : msg
-            )
-          })
-        }
-      )
-      .on('postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-        (payload: any) => {
-          const { messages } = get()
-          set({ 
-            messages: messages.filter(msg => msg.id !== payload.old.id)
-          })
-        }
-      )
-      .subscribe()
-
-    return () => subscription.unsubscribe()
-  },
-
-  subscribeToChats: () => {
-    const subscription = supabase
-      .channel('chats')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'chats' },
-        () => {
-          get().loadChats()
-        }
-      )
-      .subscribe()
-
-    return () => subscription.unsubscribe()
-  },
-
-  deleteMessage: async (messageId: string) => {
-    try {
-      const { error } = await supabase
+    editMessage: async (messageId, content) => {
+      const { data, error } = await supabase
         .from('messages')
-        .delete()
+        .update({ content, edited_at: new Date().toISOString() })
         .eq('id', messageId)
+        .select('*')
+        .single();
+      if (error) console.error('editMessage', error);
+      return data;
+    },
 
-      if (error) throw error
-    } catch (error: any) {
-      toast({
-        title: "Failed to delete message",
-        description: error.message,
-        variant: "destructive"
-      })
-    }
-  },
+    deleteMessage: async (messageId) => {
+      const { error } = await supabase.from('messages').delete().eq('id', messageId);
+      if (error) console.error('deleteMessage', error);
+    },
 
-  editMessage: async (messageId: string, content: string) => {
-    try {
-      const { error } = await supabase
-        .from('messages')
-        .update({ 
-          content, 
-          edited_at: new Date().toISOString() 
-        })
-        .eq('id', messageId)
+    addReaction: async (messageId, emoji) => {
+      const user = useAuthStore.getState().user;
+      if (!user) throw new Error('Not authenticated');
 
-      if (error) throw error
-    } catch (error: any) {
-      toast({
-        title: "Failed to edit message",
-        description: error.message,
-        variant: "destructive"
-      })
-    }
-  },
+      const { data: msg } = await supabase.from('messages').select('reactions').eq('id', messageId).single();
+      let reactions = msg?.reactions || [];
 
-  addReaction: async (messageId: string, emoji: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) return
-
-      const { data: message } = await supabase
-        .from('messages')
-        .select('reactions')
-        .eq('id', messageId)
-        .single()
-
-      const reactions = message?.reactions || []
-      const existingReaction = reactions.find((r: any) => r.emoji === emoji)
-
-      let newReactions
-      if (existingReaction) {
-        if (!existingReaction.user_ids.includes(session.user.id)) {
-          existingReaction.user_ids.push(session.user.id)
-        }
-        newReactions = reactions
+      const idx = reactions.findIndex((r: any) => r.emoji === emoji);
+      if (idx === -1) {
+        reactions.push({ emoji, user_ids: [user.id] });
       } else {
-        newReactions = [...reactions, { emoji, user_ids: [session.user.id] }]
+        const userIds: string[] = reactions[idx].user_ids || [];
+        if (!userIds.includes(user.id)) userIds.push(user.id);
+        reactions[idx].user_ids = userIds;
       }
 
-      const { error } = await supabase
-        .from('messages')
-        .update({ reactions: newReactions })
-        .eq('id', messageId)
+      const { error } = await supabase.from('messages').update({ reactions }).eq('id', messageId);
+      if (error) console.error('addReaction', error);
+    },
 
-      if (error) throw error
-    } catch (error: any) {
-      toast({
-        title: "Failed to add reaction",
-        description: error.message,
-        variant: "destructive"
-      })
-    }
-  },
+    removeReaction: async (messageId, emoji) => {
+      const user = useAuthStore.getState().user;
+      if (!user) throw new Error('Not authenticated');
 
-  removeReaction: async (messageId: string, emoji: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) return
+      const { data: msg } = await supabase.from('messages').select('reactions').eq('id', messageId).single();
+      let reactions = msg?.reactions || [];
+      const idx = reactions.findIndex((r: any) => r.emoji === emoji);
+      if (idx === -1) return;
 
-      const { data: message } = await supabase
-        .from('messages')
-        .select('reactions')
-        .eq('id', messageId)
-        .single()
+      reactions[idx].user_ids = reactions[idx].user_ids.filter((id: string) => id !== user.id);
+      if (reactions[idx].user_ids.length === 0) {
+        reactions.splice(idx, 1);
+      }
 
-      const reactions = message?.reactions || []
-      const newReactions = reactions
-        .map((r: any) => ({
-          ...r,
-          user_ids: r.user_ids.filter((id: string) => id !== session.user.id)
-        }))
-        .filter((r: any) => r.user_ids.length > 0)
+      const { error } = await supabase.from('messages').update({ reactions }).eq('id', messageId);
+      if (error) console.error('removeReaction', error);
+    },
 
-      const { error } = await supabase
-        .from('messages')
-        .update({ reactions: newReactions })
-        .eq('id', messageId)
+    subscribeToChat: (chatId) => {
+      if (channel) {
+        try { channel.unsubscribe(); } catch (e) {}
+        channel = null;
+      }
 
-      if (error) throw error
-    } catch (error: any) {
-      toast({
-        title: "Failed to remove reaction",
-        description: error.message,
-        variant: "destructive"
-      })
-    }
-  }
-}))
+      const since = new Date(Date.now() - MESSAGE_RETENTION_MS).toISOString();
+
+      channel = supabase
+        .channel(`public:messages:chat=${chatId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+          (payload: any) => {
+            const e = payload;
+            if (e.eventType === 'INSERT') {
+              // attach user profile
+              supabase
+                .from('profiles')
+                .select('id,nickname,avatar_url')
+                .eq('id', e.new.user_id)
+                .single()
+                .then(({ data: profile }) => {
+                  set((s) => {
+                    // ignore if older than retention
+                    if (new Date(e.new.created_at) < new Date(since)) return s;
+                    return { messages: [...s.messages, { ...e.new, users: profile }] };
+                  });
+                });
+            } else if (e.eventType === 'UPDATE') {
+              set((s) => ({ messages: s.messages.map((m) => (m.id === e.new.id ? { ...m, ...e.new } : m)) }));
+            } else if (e.eventType === 'DELETE') {
+              set((s) => ({ messages: s.messages.filter((m) => m.id !== e.old.id) }));
+            }
+          }
+        )
+        .subscribe();
+    },
+
+    unsubscribe: () => {
+      if (channel) {
+        try { channel.unsubscribe(); } catch (e) {}
+        channel = null;
+      }
+    },
+  };
+});
