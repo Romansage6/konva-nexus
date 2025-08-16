@@ -1,7 +1,7 @@
-import MainApp from "@/components/MainApp";
+// ADD (imports):
+import AnimeTab from "./discovery/AnimeTab";
+import AnimeDetails from "./anime/AnimeDetails";
 
-const Index = () => {
-  return <MainApp />;
-};
-
-export default Index;
+// ADD (within your <Routes>):
+<Route path="/discovery/anime" element={<AnimeTab />} />
+<Route path="/anime/:id" element={<AnimeDetails />} />
