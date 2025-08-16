@@ -1,3 +1,4 @@
+// src/lib/anilist.ts
 import { GraphQLClient, gql } from "graphql-request";
 
 const ANILIST_ENDPOINT = "https://graphql.anilist.co";
@@ -21,7 +22,7 @@ export type AniMedia = {
 
 export const queries = {
   trending: gql`
-    query Trending($page: Int = 1, $perPage: Int = 20) {
+    query Trending($page: Int = 1, $perPage: Int = 10) {
       Page(page: $page, perPage: $perPage) {
         media(sort: TRENDING_DESC, type: ANIME) {
           id
@@ -37,7 +38,7 @@ export const queries = {
     }
   `,
   topAiring: gql`
-    query TopAiring($page: Int = 1, $perPage: Int = 20) {
+    query TopAiring($page: Int = 1, $perPage: Int = 10) {
       Page(page: $page, perPage: $perPage) {
         media(sort: POPULARITY_DESC, type: ANIME, status: RELEASING) {
           id
@@ -53,7 +54,7 @@ export const queries = {
     }
   `,
   upcoming: gql`
-    query Upcoming($page: Int = 1, $perPage: Int = 20) {
+    query Upcoming($page: Int = 1, $perPage: Int = 10) {
       Page(page: $page, perPage: $perPage) {
         media(sort: POPULARITY_DESC, type: ANIME, status: NOT_YET_RELEASED) {
           id
@@ -69,7 +70,7 @@ export const queries = {
     }
   `,
   search: gql`
-    query Search($search: String!, $page: Int = 1, $perPage: Int = 30) {
+    query Search($search: String!, $page: Int = 1, $perPage: Int = 20) {
       Page(page: $page, perPage: $perPage) {
         media(search: $search, type: ANIME) {
           id
@@ -100,6 +101,9 @@ export const queries = {
   `,
 };
 
-export async function fetchAniList<T>(query: string, variables?: Record<string, any>): Promise<T> {
+export async function fetchAniList<T>(
+  query: string,
+  variables?: Record<string, any>
+): Promise<T> {
   return anilist.request<T>(query, variables);
-} I'm
+}
