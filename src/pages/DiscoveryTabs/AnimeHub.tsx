@@ -1,47 +1,80 @@
-"use client";
+import React from "react";
+import { queries, fetchAniList, type AniMedia } from "@/lib/anilist";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Search } from "lucide-react";
+import AnimeGrid from "@/components/anime/AnimeGrid";
+import { useNavigate } from "react-router-dom";
 
-import { useEffect, useState } from "react";
-import { getTrendingAnime } from "@/lib/animeApi";
-import AnimeDetails from "./AnimeDetails";
+export default function AnimeTab() {
+  const [tab, setTab] = React.useState<"trending" | "airing" | "upcoming" | "search">("trending");
+  const [query, setQuery] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [items, setItems] = React.useState<AniMedia[]>([]);
+  const nav = useNavigate();
 
-export default function AnimeHub() {
-  const [animeList, setAnimeList] = useState<any[]>([]);
-  const [selectedAnime, setSelectedAnime] = useState<any | null>(null);
+  const run = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      let data: any;
+      if (tab === "trending")
+        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.trending, { page: 1, perPage: 20 });
+      if (tab === "airing")
+        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.topAiring, { page: 1, perPage: 20 });
+      if (tab === "upcoming")
+        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.upcoming, { page: 1, perPage: 20 });
+      if (tab === "search" && query.trim())
+        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.search, { search: query, page: 1, perPage: 30 });
 
-  useEffect(() => {
-    (async () => {
-      const trending = await getTrendingAnime();
-      setAnimeList(trending);
-    })();
-  }, []);
+      setItems(data?.Page?.media ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, query]);
 
-  if (selectedAnime) {
-    return (
-      <AnimeDetails anime={selectedAnime} onBack={() => setSelectedAnime(null)} />
-    );
-  }
+  React.useEffect(() => {
+    run();
+  }, [tab, run]);
+
+  const submitSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTab("search");
+    run();
+  };
 
   return (
-    <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Trending Anime</h1>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-        {animeList.map((anime) => (
-          <div
-            key={anime.id}
-            className="bg-gray-800 p-2 rounded-xl cursor-pointer hover:scale-105 transition"
-            onClick={() => setSelectedAnime(anime)}
-          >
-            <img
-              src={anime.coverImage.large}
-              alt={anime.title.english || anime.title.romaji}
-              className="rounded-lg w-full"
-            />
-            <h2 className="mt-2 text-sm text-center">
-              {anime.title.english || anime.title.romaji}
-            </h2>
-          </div>
-        ))}
-      </div>
+    <div className="space-y-6">
+      <form onSubmit={submitSearch} className="flex gap-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search anime by title…"
+        />
+        <Button type="submit" className="gap-1">
+          <Search className="w-4 h-4" />
+          Search
+        </Button>
+      </form>
+
+      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+        <TabsList>
+          <TabsTrigger value="trending">Trending Now</TabsTrigger>
+          <TabsTrigger value="airing">Top Airing</TabsTrigger>
+          <TabsTrigger value="upcoming">Upcoming Season</TabsTrigger>
+          <TabsTrigger value="search">Search</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {loading ? (
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      ) : (
+        <AnimeGrid
+          items={items}
+          onDetails={(id) => nav(`/anime/${id}`)}
+          onWatch={(id) => nav(`/anime/${id}?autoPlay=1`)}
+        />
+      )}
     </div>
   );
 }
