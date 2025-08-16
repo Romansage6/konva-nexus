@@ -1,80 +1,166 @@
 import React from "react";
-import { queries, fetchAniList, type AniMedia } from "@/lib/anilist";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { fetchAniList, queries, type AniMedia } from "@/lib/anilist";
+import { fetchEnimeByAniListId, type EnimeEpisode } from "@/lib/enime";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search } from "lucide-react";
-import AnimeGrid from "@/components/anime/AnimeGrid";
-import { useNavigate } from "react-router-dom";
+import { Card, CardContent } from "@/components/ui/card";
+import { ChevronLeft, Play, Link2 } from "lucide-react";
 
-export default function AnimeTab() {
-  const [tab, setTab] = React.useState<"trending" | "airing" | "upcoming" | "search">("trending");
-  const [query, setQuery] = React.useState("");
-  const [loading, setLoading] = React.useState(false);
-  const [items, setItems] = React.useState<AniMedia[]>([]);
+export default function AnimeDetails() {
+  const { id } = useParams();
+  const [sp] = useSearchParams();
   const nav = useNavigate();
-
-  const run = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      let data: any;
-      if (tab === "trending")
-        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.trending, { page: 1, perPage: 20 });
-      if (tab === "airing")
-        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.topAiring, { page: 1, perPage: 20 });
-      if (tab === "upcoming")
-        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.upcoming, { page: 1, perPage: 20 });
-      if (tab === "search" && query.trim())
-        data = await fetchAniList<{ Page: { media: AniMedia[] } }>(queries.search, { search: query, page: 1, perPage: 30 });
-
-      setItems(data?.Page?.media ?? []);
-    } finally {
-      setLoading(false);
-    }
-  }, [tab, query]);
+  const [meta, setMeta] = React.useState<AniMedia | null>(null);
+  const [episodes, setEpisodes] = React.useState<EnimeEpisode[]>([]);
+  const [current, setCurrent] = React.useState<number | null>(null);
 
   React.useEffect(() => {
-    run();
-  }, [tab, run]);
+    const anilistId = Number(id);
+    (async () => {
+      const res = await fetchAniList<{ Media: AniMedia }>(queries.byId, { id: anilistId });
+      setMeta(res.Media);
 
-  const submitSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setTab("search");
-    run();
-  };
+      const enime = await fetchEnimeByAniListId(anilistId);
+      setEpisodes(enime?.episodes || []);
+
+      if (sp.get("autoPlay") && (enime?.episodes?.[0]?.number != null))
+        setCurrent(enime.episodes[0].number);
+    })();
+  }, [id, sp]);
+
+  const title =
+    meta?.title?.english || meta?.title?.romaji || meta?.title?.native || "Anime";
+  const trailerUrl =
+    meta?.trailer?.site === "youtube" && meta.trailer.id
+      ? `https://www.youtube.com/watch?v=${meta.trailer.id}`
+      : null;
 
   return (
     <div className="space-y-6">
-      <form onSubmit={submitSearch} className="flex gap-2">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search anime by title…"
-        />
-        <Button type="submit" className="gap-1">
-          <Search className="w-4 h-4" />
-          Search
-        </Button>
-      </form>
+      <Button variant="ghost" className="gap-1" onClick={() => nav(-1)}>
+        <ChevronLeft className="w-4 h-4" />
+        Back
+      </Button>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-        <TabsList>
-          <TabsTrigger value="trending">Trending Now</TabsTrigger>
-          <TabsTrigger value="airing">Top Airing</TabsTrigger>
-          <TabsTrigger value="upcoming">Upcoming Season</TabsTrigger>
-          <TabsTrigger value="search">Search</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {meta && (
+        <div className="grid grid-cols-1 md:grid-cols-[220px,1fr] gap-6">
+          <img
+            src={meta.coverImage.extraLarge || meta.coverImage.large}
+            alt={title}
+            className="rounded-2xl w-full h-auto object-cover"
+          />
+          <div className="space-y-3">
+            <h1 className="text-2xl font-bold leading-tight">{title}</h1>
+            <div className="flex flex-wrap gap-2">
+              {(meta.genres || []).map((g) => (
+                <Badge key={g} variant="secondary">
+                  {g}
+                </Badge>
+              ))}
+            </div>
+            {meta.averageScore != null && (
+              <div className="text-sm">
+                Average score: <span className="font-semibold">{meta.averageScore}%</span>
+              </div>
+            )}
+            {meta.episodes != null && (
+              <div className="text-sm">
+                Episodes: <span className="font-semibold">{meta.episodes}</span>
+              </div>
+            )}
+            {trailerUrl && (
+              <Button asChild variant="outline" className="gap-1">
+                <a href={trailerUrl} target="_blank" rel="noreferrer">
+                  <Link2 className="w-4 h-4" />
+                  Trailer
+                </a>
+              </Button>
+            )}
+            <Card>
+              <CardContent className="prose dark:prose-invert max-w-none p-4">
+                <div dangerouslySetInnerHTML={{ __html: meta.description || "" }} />
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
 
-      {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (
-        <AnimeGrid
-          items={items}
-          onDetails={(id) => nav(`/anime/${id}`)}
-          onWatch={(id) => nav(`/anime/${id}?autoPlay=1`)}
+      {current != null && (
+        <EpisodePlayer
+          anilistId={Number(id)}
+          number={current}
+          onPrev={() => setCurrent((n) => (n ?? 1) - 1)}
+          onNext={() => setCurrent((n) => (n ?? 0) + 1)}
+          episodes={episodes}
         />
       )}
+
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold">Episodes</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {episodes.map((ep) => (
+            <Button
+              key={ep.number}
+              variant={current === ep.number ? "default" : "secondary"}
+              onClick={() => setCurrent(ep.number)}
+              className="justify-between"
+            >
+              <span>Ep {ep.number}</span>
+              {ep.title ? (
+                <span className="truncate max-w-[8rem] text-xs opacity-80">{ep.title}</span>
+              ) : null}
+            </Button>
+          ))}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function EpisodePlayer({
+  number,
+  episodes,
+  onPrev,
+  onNext,
+}: {
+  anilistId: number;
+  number: number;
+  onPrev: () => void;
+  onNext: () => void;
+  episodes: EnimeEpisode[];
+}) {
+  const [src, setSrc] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const ep = episodes.find((e) => e.number === number);
+    const url = ep?.sources?.[0]?.url || null;
+    setSrc(url);
+  }, [number, episodes]);
+
+  const hasPrev = episodes.some((e) => e.number === number - 1);
+  const hasNext = episodes.some((e) => e.number === number + 1);
+
+  return (
+    <Card>
+      <CardContent className="p-3 space-y-3">
+        {src ? (
+          <video key={src} controls className="w-full rounded-lg" src={src} playsInline />
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            Source not available for this episode.
+          </div>
+        )}
+        <div className="flex justify-between">
+          <Button onClick={onPrev} disabled={!hasPrev} variant="outline">
+            Previous
+          </Button>
+          <div className="text-sm font-medium">Episode {number}</div>
+          <Button onClick={onNext} disabled={!hasNext}>
+            Next
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
