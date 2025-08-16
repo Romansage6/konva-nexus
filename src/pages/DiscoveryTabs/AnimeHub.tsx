@@ -1,59 +1,47 @@
-// src/pages/discovery/AnimeHub.tsx
+"use client";
+
 import { useEffect, useState } from "react";
-import { fetchAnime, TRENDING_QUERY, SEARCH_QUERY } from "../../lib/anilist";
-import AnimeCard from "../../components/anime/AnimeCard";
+import { getTrendingAnime } from "@/lib/animeApi";
+import AnimeDetails from "./AnimeDetails";
 
 export default function AnimeHub() {
-  const [trending, setTrending] = useState<any[]>([]);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
+  const [animeList, setAnimeList] = useState<any[]>([]);
+  const [selectedAnime, setSelectedAnime] = useState<any | null>(null);
 
   useEffect(() => {
-    async function loadTrending() {
-      const data = await fetchAnime(TRENDING_QUERY, { page: 1, perPage: 12 });
-      setTrending(data.data.Page.media);
-    }
-    loadTrending();
+    (async () => {
+      const trending = await getTrendingAnime();
+      setAnimeList(trending);
+    })();
   }, []);
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!search) return;
-    const data = await fetchAnime(SEARCH_QUERY, { search });
-    setSearchResults(data.data.Page.media);
+  if (selectedAnime) {
+    return (
+      <AnimeDetails anime={selectedAnime} onBack={() => setSelectedAnime(null)} />
+    );
   }
 
   return (
     <div className="p-4">
-      <form onSubmit={handleSearch} className="mb-4">
-        <input
-          type="text"
-          placeholder="Search anime..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full p-2 rounded-lg bg-gray-800 text-white"
-        />
-      </form>
-
-      {searchResults.length > 0 ? (
-        <>
-          <h2 className="text-xl text-white mb-2">Search Results</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {searchResults.map((a) => (
-              <AnimeCard key={a.id} anime={a} />
-            ))}
+      <h1 className="text-2xl font-bold mb-4">Trending Anime</h1>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        {animeList.map((anime) => (
+          <div
+            key={anime.id}
+            className="bg-gray-800 p-2 rounded-xl cursor-pointer hover:scale-105 transition"
+            onClick={() => setSelectedAnime(anime)}
+          >
+            <img
+              src={anime.coverImage.large}
+              alt={anime.title.english || anime.title.romaji}
+              className="rounded-lg w-full"
+            />
+            <h2 className="mt-2 text-sm text-center">
+              {anime.title.english || anime.title.romaji}
+            </h2>
           </div>
-        </>
-      ) : (
-        <>
-          <h2 className="text-xl text-white mb-2">Trending Now</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {trending.map((a) => (
-              <AnimeCard key={a.id} anime={a} />
-            ))}
-          </div>
-        </>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
