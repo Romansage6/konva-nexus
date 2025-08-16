@@ -1,79 +1,83 @@
-// src/pages/discovery/AnimeDetails.tsx
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { fetchAnime } from "../../lib/anilist";
-import { fetchAnimeEpisodes } from "../../lib/enime";
-import AnimePlayer from "../../components/anime/AnimePlayer";
+"use client";
 
-export default function AnimeDetails() {
-  const { id } = useParams<{ id: string }>();
-  const [anime, setAnime] = useState<any>(null);
+import { useEffect, useState } from "react";
+import { getEpisodes } from "@/lib/animeApi";
+import ReactPlayer from "react-player";
+
+export default function AnimeDetails({ anime, onBack }: { anime: any; onBack: () => void }) {
   const [episodes, setEpisodes] = useState<any[]>([]);
-  const [currentEp, setCurrentEp] = useState<any | null>(null);
+  const [currentEpisode, setCurrentEpisode] = useState<any | null>(null);
 
   useEffect(() => {
-    async function loadDetails() {
-      const query = `
-        query ($id: Int) {
-          Media(id: $id, type: ANIME) {
-            id
-            title { romaji english native }
-            coverImage { large }
-            description
-            genres
-            averageScore
-            episodes
-          }
-        }
-      `;
-      const data = await fetchAnime(query, { id: Number(id) });
-      setAnime(data.data.Media);
-
-      const epData = await fetchAnimeEpisodes(Number(id));
-      setEpisodes(epData.episodes || []);
-    }
-    loadDetails();
-  }, [id]);
+    (async () => {
+      const data = await getEpisodes(anime.id);
+      if (data?.episodes) setEpisodes(data.episodes);
+    })();
+  }, [anime]);
 
   return (
-    <div className="p-4 text-white">
-      {anime && (
-        <>
-          <div className="flex gap-4">
-            <img
-              src={anime.coverImage.large}
-              alt={anime.title.english}
-              className="w-48 rounded-xl"
-            />
-            <div>
-              <h1 className="text-2xl font-bold">{anime.title.english || anime.title.romaji}</h1>
-              <p dangerouslySetInnerHTML={{ __html: anime.description }} />
-              <p className="mt-2">Genres: {anime.genres.join(", ")}</p>
-              <p>Rating: {anime.averageScore}</p>
-              <p>Total Episodes: {anime.episodes}</p>
-            </div>
-          </div>
+    <div className="p-4">
+      <button
+        className="mb-4 px-3 py-1 bg-purple-600 text-white rounded-lg"
+        onClick={onBack}
+      >
+        ← Back
+      </button>
 
-          <h2 className="text-xl mt-6 mb-2">Episodes</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="flex flex-col md:flex-row gap-6">
+        <img
+          src={anime.coverImage.large}
+          alt={anime.title.english}
+          className="rounded-lg w-60"
+        />
+        <div>
+          <h1 className="text-2xl font-bold">{anime.title.english || anime.title.romaji}</h1>
+          <p
+            className="mt-2 text-sm text-gray-300"
+            dangerouslySetInnerHTML={{ __html: anime.description }}
+          />
+          <p className="mt-2">⭐ {anime.averageScore}%</p>
+          <p>Genres: {anime.genres.join(", ")}</p>
+          <p>Total Episodes: {anime.episodes || "?"}</p>
+        </div>
+      </div>
+
+      {currentEpisode ? (
+        <div className="mt-6">
+          <h2 className="text-xl font-semibold">Episode {currentEpisode.number}: {currentEpisode.title}</h2>
+          <ReactPlayer
+            url={currentEpisode.sources[0].url}
+            controls
+            width="100%"
+            height="500px"
+          />
+          <div className="flex gap-2 mt-4 flex-wrap">
             {episodes.map((ep) => (
               <button
                 key={ep.number}
-                onClick={() => setCurrentEp(ep)}
-                className="bg-gray-700 hover:bg-purple-600 py-2 px-3 rounded-lg"
+                onClick={() => setCurrentEpisode(ep)}
+                className={`px-3 py-1 rounded-lg ${ep.number === currentEpisode.number ? "bg-purple-600" : "bg-gray-700"} text-white`}
               >
-                Episode {ep.number}
+                Ep {ep.number}
               </button>
             ))}
           </div>
-
-          {currentEp && (
-            <div className="mt-6">
-              <h3 className="text-lg font-bold mb-2">{currentEp.title}</h3>
-              <AnimePlayer episode={currentEp} />
-            </div>
-          )}
-        </>
+        </div>
+      ) : (
+        <div className="mt-6">
+          <h2 className="text-xl font-semibold">Episodes</h2>
+          <div className="flex gap-2 flex-wrap mt-2">
+            {episodes.map((ep) => (
+              <button
+                key={ep.number}
+                onClick={() => setCurrentEpisode(ep)}
+                className="px-3 py-1 rounded-lg bg-gray-700 text-white hover:bg-purple-600"
+              >
+                Ep {ep.number}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
