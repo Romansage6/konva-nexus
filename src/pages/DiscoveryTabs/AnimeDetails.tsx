@@ -1,184 +1,161 @@
-// src/routes/anime/AnimeDetails.tsx
+// src/pages/DiscoveryTabs/AnimeDetails.tsx
 import React from "react";
-import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { fetchAniList, queries, type AniMedia } from "@/lib/anilist";
-import { fetchEnimeByAniListId, type EnimeEpisode } from "@/lib/enime";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChevronLeft, Play, Link2 } from "lucide-react";
+
+type EnimeEpisode = {
+  number: number;
+  title?: string;
+  sources: { url: string; quality?: string }[];
+};
+
+type EnimeResponse = {
+  id: string;
+  title: string;
+  episodes: EnimeEpisode[];
+};
 
 export default function AnimeDetails() {
   const { id } = useParams();
-  const [sp] = useSearchParams();
-  const nav = useNavigate();
-  const [meta, setMeta] = React.useState<AniMedia | null>(null);
+  const navigate = useNavigate();
+  const [anime, setAnime] = React.useState<AniMedia | null>(null);
   const [episodes, setEpisodes] = React.useState<EnimeEpisode[]>([]);
-  const [current, setCurrent] = React.useState<number | null>(null);
+  const [currentEp, setCurrentEp] = React.useState<EnimeEpisode | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    const anilistId = Number(id);
-    if (!anilistId) return;
+    async function load() {
+      if (!id) return;
+      try {
+        setLoading(true);
+        // AniList metadata
+        const data = await fetchAniList<{ Media: AniMedia }>(queries.byId, { id: Number(id) });
+        setAnime(data.Media);
 
-    (async () => {
-      const res = await fetchAniList<{ Media: AniMedia }>(queries.byId, {
-        id: anilistId,
-      });
-      setMeta(res.Media);
-
-      const enime = await fetchEnimeByAniListId(anilistId);
-      const eps = enime?.episodes || [];
-      setEpisodes(eps);
-
-      if (sp.get("autoPlay") && eps[0]?.number != null) {
-        setCurrent(eps[0].number);
+        // Enime episodes
+        const res = await fetch(`https://api.enime.moe/anime/${id}`);
+        if (res.ok) {
+          const json: EnimeResponse = await res.json();
+          setEpisodes(json.episodes ?? []);
+          if (json.episodes.length > 0) {
+            setCurrentEp(json.episodes[0]);
+          }
+        }
+      } catch (e) {
+        console.error("AnimeDetails error", e);
+      } finally {
+        setLoading(false);
       }
-    })();
-  }, [id, sp]);
+    }
+    load();
+  }, [id]);
 
-  const title =
-    meta?.title?.english || meta?.title?.romaji || meta?.title?.native || "Anime";
+  function playEp(ep: EnimeEpisode) {
+    setCurrentEp(ep);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
-  const trailerUrl =
-    meta?.trailer?.site?.toLowerCase() === "youtube" && meta.trailer.id
-      ? `https://www.youtube.com/watch?v=${meta.trailer.id}`
-      : null;
+  if (loading) return <div className="p-4">Loading…</div>;
+  if (!anime) return <div className="p-4">Anime not found.</div>;
 
   return (
-    <div className="space-y-6" style={{ pointerEvents: "auto" }}>
-      <Button variant="ghost" className="gap-1" onClick={() => nav(-1)}>
-        <ChevronLeft className="w-4 h-4" />
-        Back
-      </Button>
-
-      {meta && (
-        <div className="grid grid-cols-1 md:grid-cols-[220px,1fr] gap-6">
-          <img
-            src={meta.coverImage.extraLarge || meta.coverImage.large}
-            alt={title}
-            className="rounded-2xl w-full h-auto object-cover"
+    <div className="space-y-6 p-4">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row gap-4">
+        <img
+          src={anime.coverImage?.extraLarge || anime.coverImage?.large}
+          alt={anime.title.english || anime.title.romaji}
+          className="w-48 rounded-lg shadow"
+        />
+        <div className="flex-1 space-y-2">
+          <h1 className="text-2xl font-bold">
+            {anime.title.english || anime.title.romaji}
+          </h1>
+          <div className="flex gap-2 flex-wrap text-sm text-muted-foreground">
+            {anime.genres?.map((g) => (
+              <span key={g} className="bg-secondary px-2 py-1 rounded">
+                {g}
+              </span>
+            ))}
+          </div>
+          <p
+            className="prose prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: anime.description || "" }}
           />
-          <div className="space-y-3">
-            <h1 className="text-2xl font-bold leading-tight">{title}</h1>
-            <div className="flex flex-wrap gap-2">
-              {(meta.genres || []).map((g) => (
-                <Badge key={g} variant="secondary">
-                  {g}
-                </Badge>
-              ))}
-            </div>
-            {meta.averageScore != null && (
-              <div className="text-sm">
-                Average score: <span className="font-semibold">{meta.averageScore}%</span>
-              </div>
-            )}
-            {meta.episodes != null && (
-              <div className="text-sm">
-                Episodes: <span className="font-semibold">{meta.episodes}</span>
-              </div>
-            )}
-            {trailerUrl && (
-              <Button asChild variant="outline" className="gap-1">
-                <a href={trailerUrl} target="_blank" rel="noreferrer">
-                  <Link2 className="w-4 h-4" />
-                  Trailer
-                </a>
-              </Button>
-            )}
-            <Card>
-              <CardContent className="prose dark:prose-invert max-w-none p-4">
-                <div
-                  dangerouslySetInnerHTML={{ __html: meta.description || "" }}
-                />
-              </CardContent>
-            </Card>
+          {anime.trailer?.site === "youtube" && (
+            <Button
+              onClick={() =>
+                window.open(`https://youtube.com/watch?v=${anime.trailer?.id}`, "_blank")
+              }
+            >
+              Watch Trailer
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Video Player */}
+      {currentEp && (
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold">
+            Episode {currentEp.number}: {currentEp.title || ""}
+          </h2>
+          <video
+            src={currentEp.sources[0]?.url}
+            controls
+            className="w-full rounded-lg shadow"
+          />
+          <div className="flex justify-between">
+            <Button
+              disabled={currentEp.number <= 1}
+              onClick={() => {
+                const prev = episodes.find((e) => e.number === currentEp.number - 1);
+                if (prev) playEp(prev);
+              }}
+            >
+              ◀ Prev
+            </Button>
+            <Button
+              disabled={currentEp.number >= episodes.length}
+              onClick={() => {
+                const next = episodes.find((e) => e.number === currentEp.number + 1);
+                if (next) playEp(next);
+              }}
+            >
+              Next ▶
+            </Button>
           </div>
         </div>
-      )}
-
-      {/* Player */}
-      {current != null && (
-        <EpisodePlayer
-          number={current}
-          onPrev={() => setCurrent((n) => (n ?? 1) - 1)}
-          onNext={() => setCurrent((n) => (n ?? 0) + 1)}
-          episodes={episodes}
-        />
       )}
 
       {/* Episode list */}
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold">Episodes</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+      <div>
+        <h2 className="text-lg font-semibold mb-2">Episodes</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {episodes.map((ep) => (
-            <Button
+            <Card
               key={ep.number}
-              variant={current === ep.number ? "default" : "secondary"}
-              onClick={() => setCurrent(ep.number)}
-              className="justify-between"
+              className={`cursor-pointer hover:ring-2 ${
+                currentEp?.number === ep.number ? "ring-primary" : ""
+              }`}
+              onClick={() => playEp(ep)}
             >
-              <span>Ep {ep.number}</span>
-              {ep.title ? (
-                <span className="truncate max-w-[8rem] text-xs opacity-80">
+              <CardContent className="p-2">
+                <div className="font-semibold">Ep {ep.number}</div>
+                <div className="text-xs text-muted-foreground truncate">
                   {ep.title}
-                </span>
-              ) : null}
-            </Button>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </div>
+
+      <Button variant="outline" onClick={() => navigate(-1)}>
+        ← Back
+      </Button>
     </div>
-  );
-}
-
-function EpisodePlayer({
-  number,
-  onPrev,
-  onNext,
-  episodes,
-}: {
-  number: number;
-  onPrev: () => void;
-  onNext: () => void;
-  episodes: EnimeEpisode[];
-}) {
-  const [src, setSrc] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    const ep = episodes.find((e) => e.number === number);
-    const url = ep?.sources?.[0]?.url || null;
-    setSrc(url);
-  }, [number, episodes]);
-
-  const hasPrev = episodes.some((e) => e.number === number - 1);
-  const hasNext = episodes.some((e) => e.number === number + 1);
-
-  return (
-    <Card>
-      <CardContent className="p-3 space-y-3">
-        {src ? (
-          <video
-            key={src}
-            controls
-            className="w-full rounded-lg"
-            src={src}
-            playsInline
-          />
-        ) : (
-          <div className="text-sm text-muted-foreground">
-            Source not available for this episode.
-          </div>
-        )}
-        <div className="flex justify-between">
-          <Button onClick={onPrev} disabled={!hasPrev} variant="outline">
-            Previous
-          </Button>
-          <div className="text-sm font-medium">Episode {number}</div>
-          <Button onClick={onNext} disabled={!hasNext}>
-            Next
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
