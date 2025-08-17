@@ -1,11 +1,7 @@
 // src/lib/anilist.ts
-import { GraphQLClient, gql } from "graphql-request";
+// Lightweight AniList GraphQL client (no external deps)
 
 const ANILIST_ENDPOINT = "https://graphql.anilist.co";
-
-export const anilist = new GraphQLClient(ANILIST_ENDPOINT, {
-  headers: { "Content-Type": "application/json" },
-});
 
 export type AniTitle = { romaji?: string; english?: string; native?: string };
 export type AniTrailer = { id?: string; site?: string | null };
@@ -20,8 +16,11 @@ export type AniMedia = {
   trailer?: AniTrailer | null;
 };
 
+export type AniPage = { Page: { media: AniMedia[] } };
+
+// Queries
 export const queries = {
-  trending: gql`
+  trending: `
     query Trending($page: Int = 1, $perPage: Int = 10) {
       Page(page: $page, perPage: $perPage) {
         media(sort: TRENDING_DESC, type: ANIME) {
@@ -37,7 +36,7 @@ export const queries = {
       }
     }
   `,
-  topAiring: gql`
+  topAiring: `
     query TopAiring($page: Int = 1, $perPage: Int = 10) {
       Page(page: $page, perPage: $perPage) {
         media(sort: POPULARITY_DESC, type: ANIME, status: RELEASING) {
@@ -53,10 +52,10 @@ export const queries = {
       }
     }
   `,
-  upcoming: gql`
+  upcoming: `
     query Upcoming($page: Int = 1, $perPage: Int = 10) {
       Page(page: $page, perPage: $perPage) {
-        media(sort: POPULARITY_DESC, type: ANIME, status: NOT_YET_RELEASED) {
+        media(type: ANIME, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) {
           id
           title { romaji english native }
           coverImage { large }
@@ -69,7 +68,7 @@ export const queries = {
       }
     }
   `,
-  search: gql`
+  search: `
     query Search($search: String!, $page: Int = 1, $perPage: Int = 20) {
       Page(page: $page, perPage: $perPage) {
         media(search: $search, type: ANIME) {
@@ -85,7 +84,7 @@ export const queries = {
       }
     }
   `,
-  byId: gql`
+  byId: `
     query ById($id: Int!) {
       Media(id: $id, type: ANIME) {
         id
@@ -99,11 +98,22 @@ export const queries = {
       }
     }
   `,
-};
+} as const;
 
+// Minimal fetcher
 export async function fetchAniList<T>(
   query: string,
   variables?: Record<string, any>
 ): Promise<T> {
-  return anilist.request<T>(query, variables);
+  const res = await fetch(ANILIST_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`AniList error ${res.status}: ${text}`);
+  }
+  const json = await res.json();
+  return json.data as T;
 }
